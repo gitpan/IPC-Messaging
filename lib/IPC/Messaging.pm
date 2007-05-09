@@ -7,11 +7,12 @@ use base 'Exporter';
 use vars qw(@EXPORT $VERSION);
 use B::Generate;
 use IO::Socket::UNIX;
+use IO::Socket::INET;
 use JSON::XS;
 use Time::HiRes;
 use IO::Select;
 
-$VERSION = '0.01_01';
+$VERSION = '0.01_02';
 sub spawn (&);
 sub receive (&);
 sub got ($);
@@ -21,14 +22,17 @@ sub after ($);
 @EXPORT = qw(spawn receive got then after);
 
 my $MAX_DGRAM_SIZE = 16384;
+my $TCP_READ_SIZE  = 65536;
 my $secret;
 my $root;
 my $messaging_dir;
 my $i_am_root;
 my $my_sock;
+my $my_sock_fileno;
 my %their_sock;
 my @msg_queue;
 my $recv;
+my %read_socks;
 
 sub debug
 {
@@ -111,7 +115,7 @@ sub run_queue
 			next unless $match;
 			debug "MATCH $m->{m}!\n";
 			splice @msg_queue, $i, 1;
-			my $proc = IPC::Messaging::Process->_new($m->{f});
+			my $proc = $m->{sock} || ($m->{f} ? IPC::Messaging::Process->_new($m->{f}) : undef);
 			$_ = $proc;
 			$ev_act->[1]->($m->{m}, $m->{d}, $proc);
 			return 1;
@@ -123,18 +127,89 @@ sub pickup_one_message
 {
 	my ($t) = @_;
 	debug "$$: select $my_sock $t\n";
-	my @r = IO::Select->new($my_sock)->can_read($t);
-	if (@r) {
-		my $data = "";
-		$my_sock->recv($data, $MAX_DGRAM_SIZE);
-		return unless $data;
-		debug "$$: got something:\n\t$data\n";
-		my $msg = eval { from_json($data) };
-		return unless $msg;
-		return unless $msg->{s} && $msg->{s} eq $secret && $msg->{m} && $msg->{f};
-		$msg->{d} ||= {};
-		push @msg_queue, $msg;
+	my @r = IO::Select->new($my_sock,map { $_->{sock} } values %read_socks)->can_read($t);
+	for my $r (@r) {
+		my $fd = $r->fileno;
+		if ($fd == $my_sock_fileno) {
+			my $data = "";
+			$my_sock->recv($data, $MAX_DGRAM_SIZE);
+			return unless $data;
+			debug "$$: got something:\n\t$data\n";
+			my $msg = eval { from_json($data) };
+			return unless $msg;
+			return unless $msg->{s} && $msg->{s} eq $secret && $msg->{m} && $msg->{f};
+			$msg->{d} ||= {};
+			push @msg_queue, $msg;
+		} elsif ($read_socks{$fd}) {
+			if ($read_socks{$fd}->{type} eq "tcp_listen") {
+				my $sock = $read_socks{$fd}->{sock}->accept;
+				my $from = $sock->peerhost;
+				my $from_port = $sock->peerport;
+				push @msg_queue, {
+					m    => "tcp_connect",
+					sock => $sock,
+					d    => {
+						from      => $from,
+						from_port => $from_port,
+					},
+				};
+				$read_socks{$sock->fileno} = {
+					sock      => $sock,
+					type      => "tcp",
+					from      => $from,
+					from_port => $from_port,
+				};
+			} elsif ($read_socks{$fd}->{type} eq "tcp") {
+				my $d = "";
+				my $sock = $read_socks{$fd}->{sock};
+				my $len = sysread $sock, $d, $TCP_READ_SIZE;
+				if ($len <= 0) {
+					push @msg_queue, {
+						m    => "tcp_disconnect",
+						d    => {
+							from      => $read_socks{$fd}->{from},
+							from_port => $read_socks{$fd}->{from_port},
+						},
+					};
+					delete $read_socks{$fd};
+					$sock->close;
+				} else {
+					push @msg_queue, {
+						m    => "tcp_data",
+						sock => $sock,
+						d    => {
+							from      => $read_socks{$fd}->{from},
+							from_port => $read_socks{$fd}->{from_port},
+							data      => $d,
+						},
+					};
+				}
+			} else {
+				# XXX
+				# Something is fishy, we don't know what to do with this
+				# socket, so delete it from %read_socks in order to not
+				# have the "always ready" condition.
+				delete $read_socks{$fd};
+			}
+		}
 	}
+}
+
+sub tcp_server
+{
+	my (undef, $port, $bind) = @_;
+	my $sock = IO::Socket::INET->new(
+		Listen    => 5,
+		($bind ? (LocalAddr => $bind) : ()),
+		LocalPort => $port,
+		Proto     => "tcp",
+		ReuseAddr => 1,
+		ReusePort => 1,
+	) or die $@;
+	$read_socks{$sock->fileno} = {
+		sock => $sock,
+		type => "tcp_listen",
+	};
 }
 
 sub receive (&)
@@ -236,8 +311,10 @@ sub initpid
 		Local     => "$messaging_dir/$$.sock",
 		Type      => SOCK_DGRAM)
 	or die $@;
-	%their_sock = ();
-	@msg_queue = ();
+	$my_sock_fileno = $my_sock->fileno;
+	%their_sock   = ();
+	@msg_queue    = ();
+	%read_socks = ();
 }
 
 package IPC::Messaging::Process;
@@ -307,28 +384,54 @@ IPC::Messaging - process handling and message passing, Erlang style
 
 =head1 VERSION
 
-This document describes IPC::Messaging version 0.01_01.
+This document describes IPC::Messaging version 0.01_02.
 
 =head1 SYNOPSIS
 
-my $proc = spawn {
-  receive {
-    got ping => then {
-      print "$$: got ping from $_\n";
-      $_->pong;
-    };
-  };
-};
+ use IPC::Messaging;
+ 
+ # Process creation
+ my $proc = spawn {
+   receive {
+     got ping => then {
+       print "$$: got ping from $_\n";
+       $_->pong;
+     };
+   };
+ };
+ 
+ # Message sending
+ $proc->ping;
+ # Message matching
+ receive {
+   got _ then {
+     my ($message, $message_data, $from) = @_;
+     print "$$: got $message from $from\n";
+ 	# $_ is the same as $from:
+     print "$$: got $_[0] from $_\n";
+   };
+   after 2 => then {
+     print "$$: timeout\n";
+   };
+ };
+ 
+ # TCP via message matching
+ IPC::Messaging->tcp_server(1111);
+ while (1) {
+   receive {
+     got tcp_connect => then {
+       print "connect from $_[1]->{from}\n";
+       print $_ "hi\n"; 
+     };
+     got tcp_data => then {
+       print "got data: $_[1]->{data}\n";
+     };
+     got tcp_disconnect => then {
+       print "disconnect from $_[1]->{from}\n";
+     };
+   };
+ }
 
-$proc->ping;
-receive {
-  got _ then {
-    print "$$: got $_[0] from $_\n";
-  };
-  after 2 => then {
-    print "$$: timeout\n";
-  };
-};
 
 =head1 DESCRIPTION
 
@@ -346,7 +449,8 @@ This module, in all likelihood, will only work on Unix-like operating systems.
 =head1 BUGS AND LIMITATIONS
 
 No bugs known.  The API is a moving target.  To be useful,
-reads from sockets in form of messages must be supported.
+reads from sockets in form of messages must be supported
+to a greater degree than they are now.
 
 =head1 AUTHOR
 

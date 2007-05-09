@@ -9,6 +9,7 @@ license         'bsd';
 # Specific dependencies
 requires        'B::Generate'      => 0;
 requires        'IO::Socket::UNIX' => 0;
+requires        'IO::Socket::INET' => 0;
 requires        'JSON::XS'         => 0;
 requires        'Time::HiRes'      => 0;
 requires        'IO::Select'       => 0;

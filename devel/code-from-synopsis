@@ -1,0 +1,21 @@
+#! /usr/bin/perl
+use lib qw(lib ../lib);
+use IPC::Messaging;
+my $proc = spawn {
+  receive {
+    got ping => then {
+      print "$$: got ping from $_\n";
+      $_->pong;
+    };
+  };
+};
+
+$proc->ping;
+receive {
+  got _ => then {
+    print "$$: got $_[0] from $_\n";
+  };
+  after 2 => then {
+    print "$$: timeout\n";
+  };
+};

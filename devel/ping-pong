@@ -1,0 +1,47 @@
+#! /usr/bin/perl
+use strict;
+use warnings;
+use lib qw(lib ../lib);
+use IPC::Messaging;
+
+print "$$: I am the main one\n";
+my $p = spawn {
+	print "$$: started\n";
+	while (1) {
+		receive {
+			got ping => then {
+				print "$$: ping from $_\n";
+				$_->pong;
+			};
+			got done => then {
+				while (1) {
+					receive {
+						got _ => then { print "$_[0]\n"; };
+						after 0 => then {
+							print "$$: exiting\n";
+							exit;
+						};
+					};
+				}
+			};
+		};
+	}
+};
+
+$p->blah;
+$p->blah;
+$p->blah;
+for (1..4) {
+	$p->ping;
+	receive {
+		got pong => then {
+			print "$$: pong from $_\n";
+		};
+	};
+}
+$p->done;
+receive {
+	got _ => then {
+		print "$$: $_[0] from $_\n";
+	};
+};

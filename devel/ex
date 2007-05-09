@@ -1,0 +1,17 @@
+pseudo code - does not run
+
+my $p = spawn(\&proc_sub);
+$p << [ msgname => { extra => 'data' } ];
+receive {
+	got 'msg1' => then {
+	};
+	got [ msg2 => { match => 'something } ] => then {
+	};
+	got [ _ => $p ] => then {
+	};
+	got [ 'EXIT' ] => then {
+		print "Process $_[1] has died\n";
+	};
+	timeout 5 => then {
+	};
+};

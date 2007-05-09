@@ -1,4 +1,12 @@
 Changes
+MANIFEST
+META.yml
+Makefile.PL
+README
+devel/code-from-synopsis
+devel/ex
+devel/ping-pong
+devel/tt
 inc/Module/AutoInstall.pm
 inc/Module/Install.pm
 inc/Module/Install/AutoInstall.pm
@@ -11,8 +19,4 @@ inc/Module/Install/Metadata.pm
 inc/Module/Install/Win32.pm
 inc/Module/Install/WriteAll.pm
 lib/IPC/Messaging.pm
-Makefile.PL
-MANIFEST
-META.yml
-README
 t/00.load.t
