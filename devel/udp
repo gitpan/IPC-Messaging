@@ -1,0 +1,19 @@
+#! /usr/bin/perl
+use strict;
+use warnings;
+use lib qw(lib ../lib);
+use IPC::Messaging;
+
+my $u = IPC::Messaging->udp(5550);
+while (1) {
+	receive {
+		got udp => $u => then {
+			my ($m, $d, $sock) = @_;
+			print "got $m: $d->{data} from $d->{from}:$d->{from_port}\n";
+			$sock->sendto("heps\n", $d->{from}, $d->{from_port});
+		};
+		after 5 => then {
+			print "boing\n";
+		};
+	};
+}

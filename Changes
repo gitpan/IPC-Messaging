@@ -1,3 +1,11 @@
-0.01_02 tcp_server added
+Revision history for IPC::Messaging
 
-0.01_01 initial
+0.01_03  Sat May 12 23:15:53 2007
+       Change syntax for message matching.
+       Add UDP sockets support.
+
+0.01_02
+       tcp_server added
+
+0.01_01
+       initial

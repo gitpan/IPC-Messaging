@@ -7,6 +7,7 @@ devel/code-from-synopsis
 devel/ex
 devel/ping-pong
 devel/tt
+devel/udp
 inc/Module/AutoInstall.pm
 inc/Module/Install.pm
 inc/Module/Install/AutoInstall.pm
@@ -20,3 +21,4 @@ inc/Module/Install/Win32.pm
 inc/Module/Install/WriteAll.pm
 lib/IPC/Messaging.pm
 t/00.load.t
+t/20.bad-syntax.t

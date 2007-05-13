@@ -11,13 +11,14 @@ use IO::Socket::INET;
 use JSON::XS;
 use Time::HiRes;
 use IO::Select;
+use Carp;
 
-$VERSION = '0.01_02';
+$VERSION = '0.01_03';
 sub spawn (&);
 sub receive (&);
-sub got ($);
+sub got;
 sub then (&);
-sub after ($);
+sub after ($$);
 
 @EXPORT = qw(spawn receive got then after);
 
@@ -77,37 +78,27 @@ sub END
 sub run_queue
 {
 	my ($r) = @_;
-	return unless @{$r->{evs}};
+	return unless @{$r->{pats}};
 	for (my $i = 0; $i < @msg_queue; $i++) {
 		my $m = $msg_queue[$i];
-		for my $ev_act (@{$r->{evs}}) {
-			my $ev = $ev_act->[0];
-			if (ref $ev eq "ARRAY" && $ev->[0] ne $m->{m} && $ev->[0] ne "_") {
+		for my $pat (@{$r->{pats}}) {
+			if ($pat->{name} ne $m->{m} && $pat->{name} ne "_") {
 				# does not match if message name is different
-				# (complex message pattern)
 				next;
 			}
-			if (!ref $ev && $ev ne $m->{m} && $ev ne "_") {
-				# does not match if message name is different
-				# (simple message pattern)
+			if ($pat->{proc} && $m->{f} && $m->{f} != $pat->{proc}) {
+				# does not match if sender process is different
 				next;
 			}
-			if (ref $ev eq "ARRAY" && $ev->[1] && ref $ev->[1] ne "HASH" &&
-				"$ev->[1]" !~ /\D/ && "$ev->[1]" != $m->{f})
-			{
-				# does not match if sender is different
+			my $msock = $m->{fsock} || $m->{sock};
+			if ($pat->{sock} && $msock && $msock->fileno != $pat->{sock}) {
+				# does not match if sender socket is different
 				next;
 			}
-			my $h = {};
-			for (1,2) {
-				if (ref $ev eq "ARRAY" && $ev->[$_] && ref $ev->[$_] eq "HASH") {
-					$h = $ev->[$_];
-					last;
-				}
-			}
+			my $h = $pat->{match} || {};
 			my $match = 1;
 			for my $k (keys %$h) {
-				unless (exists $m->{d}{$k} && $m->{data}{$k} eq $h->{$k}) {
+				unless (exists $m->{d}{$k} && $m->{d}{$k} eq $h->{$k}) {
 					$match = 0;
 					last;
 				}
@@ -115,9 +106,9 @@ sub run_queue
 			next unless $match;
 			debug "MATCH $m->{m}!\n";
 			splice @msg_queue, $i, 1;
-			my $proc = $m->{sock} || ($m->{f} ? IPC::Messaging::Process->_new($m->{f}) : undef);
-			$_ = $proc;
-			$ev_act->[1]->($m->{m}, $m->{d}, $proc);
+			my $proc_or_sock = $m->{sock} || ($m->{f} ? IPC::Messaging::Process->_new($m->{f}) : undef);
+			$_ = $proc_or_sock;
+			${$pat->{then}}->($m->{m}, $m->{d}, $proc_or_sock);
 			return 1;
 		}
 	}
@@ -146,9 +137,10 @@ sub pickup_one_message
 				my $from = $sock->peerhost;
 				my $from_port = $sock->peerport;
 				push @msg_queue, {
-					m    => "tcp_connect",
-					sock => $sock,
-					d    => {
+					m     => "tcp_connect",
+					fsock => $read_socks{$fd}->{sock},
+					sock  => $sock,
+					d     => {
 						from      => $from,
 						from_port => $from_port,
 					},
@@ -184,6 +176,21 @@ sub pickup_one_message
 						},
 					};
 				}
+			} elsif ($read_socks{$fd}->{type} eq "udp") {
+				my $d = "";
+				my $sock = $read_socks{$fd}->{sock};
+				$sock->recv($d, $MAX_DGRAM_SIZE);
+				return unless $d;
+				debug "$$: got udp\n";
+				push @msg_queue, {
+					m    => "udp",
+					sock => $sock,
+					d    => {
+						from      => $sock->peerhost,
+						from_port => $sock->peerport,
+						data      => $d,
+					},
+				};
 			} else {
 				# XXX
 				# Something is fishy, we don't know what to do with this
@@ -210,18 +217,38 @@ sub tcp_server
 		sock => $sock,
 		type => "tcp_listen",
 	};
+	return $sock;
+}
+
+sub udp
+{
+	my (undef, $port, $bind) = @_;
+	$port ||= 0;
+	my $sock = IPC::Messaging::UDP->new(
+		Proto     => "udp",
+		LocalPort => $port,
+		($bind ? (LocalAddr => $bind) : ()),
+		ReuseAddr => 1,
+		ReusePort => 1,
+	) or die $@;
+	$read_socks{$sock->fileno} = {
+		sock => $sock,
+		type => "udp",
+	};
+	return $sock;
 }
 
 sub receive (&)
 {
 	my ($rsub) = @_;
 	die "internal error: non-empty \$recv" if $recv;
-	my $r = $recv = {};
+	my $r = $recv = { then_balance => 0 };
 	debug "$$: receive\n";
-	$rsub->();
+	eval { $rsub->(); };
 	$recv = undef;
-	die "\"got\" without \"then\"" if $r->{ev};
-	unless ($r->{evs} || $r->{timeout}) {
+	die $@ if $@;
+	croak "dangling \"then\"" if $r->{then_balance};
+	unless ($r->{pats} || $r->{timeout}) {
 		die "an empty \"receive\"";
 	}
 	my $start = Time::HiRes::time;
@@ -244,47 +271,72 @@ sub receive (&)
 		}
 		if ($r->{timeout} && $r->{timeout}[0]-(Time::HiRes::time()-$start) < 0) {
 			debug "$$: timeout!\n";
-			$r->{timeout}[1]->();
+			${$r->{timeout}[1]}->();
 			last;
 		}
 	}
 	debug "$$: /receive\n";
 }
 
-sub got ($)
+sub got
 {
-	my ($match) = @_;
+	my (@p) = @_;
 	die "\"got\" outside \"receive\"" unless $recv;
-	die "\"got\" without \"then\"" if $recv->{ev};
-	die "\"after\" must come the last in \"receive\"" if $recv->{timeout};
-	$recv->{ev} = $match;
-	debug "$$: got [match]\n";
+	die "invalid \"got\" syntax: not enough arguments" unless @p >= 2;
+	my $pat = {};
+	$pat->{then} = pop @p;
+	die "invalid \"got\" syntax: missing \"then\""
+		unless UNIVERSAL::isa($pat->{then}, "IPC::Messaging::Then");
+	if (UNIVERSAL::isa($p[0], "ARRAY")) {
+		if (@p != 1) {
+			die "invalid \"got\" syntax: arrayref not by itself";
+		}
+		@p = @{$p[0]};
+	}
+	die "invalid \"got\" syntax: missing message name" unless @p;
+	my $name = shift @p;
+	die "invalid \"got\" syntax: message name must not be a reference" if ref $name;
+	$pat->{name} = $name;
+	if (@p) {
+		my $from = $p[0];
+		if (UNIVERSAL::isa($from, "IPC::Messaging::Process")) {
+			$pat->{proc} = "$from";
+			shift @p;
+		} elsif (UNIVERSAL::isa($from, "IO::Handle")) {
+			$pat->{sock} = $from->fileno;
+			shift @p;
+		}
+	}
+	if (@p) {
+		if (UNIVERSAL::isa($p[0], "HASH")) {
+			die "invalid \"got\" syntax: unexpected hashref" unless @p == 1;
+			@p = %{$p[0]};
+		} elsif (@p % 2 != 0) {
+			die "invalid \"got\" syntax: odd number of matching elements";
+		}
+	}
+	$pat->{match} = {@p} if @p;
+	push @{$recv->{pats}}, $pat;
+	$recv->{then_balance}--;
 }
 
 sub then (&)
 {
 	my ($act) = @_;
 	die "\"then\" outside \"receive\"" unless $recv;
-	if ($recv->{ev}) {
-		push @{$recv->{evs}}, [$recv->{ev}, $act];
-		$recv->{ev} = undef;
-	} elsif ($recv->{timeout}) {
-		die "\"then\" without \"got\"" if @{$recv->{timeout}} > 1;
-		push @{$recv->{timeout}}, $act;
-	} else {
-		die "\"then\" without \"got\"";
-	}
-	debug "$$: then [act]\n";
+	$recv->{then_balance}++;
+	bless \$act, "IPC::Messaging::Then";
 }
 
-sub after ($)
+sub after ($$)
 {
-	my ($t) = @_;
+	my ($t, $then) = @_;
 	die "\"after\" outside \"receive\"" unless $recv;
-	die "\"got\" without \"then\"" if $recv->{ev};
+	die "invalid \"after\" syntax: missing \"then\""
+		unless UNIVERSAL::isa($then, "IPC::Messaging::Then");
 	die "duplicate \"after\" in \"receive\"" if $recv->{timeout};
-	$recv->{timeout} = [$t];
-	debug "$$: after [$t]\n";
+	$recv->{then_balance}--;
+	$recv->{timeout} = [$t, $then];
 }
 
 sub global_init
@@ -371,6 +423,19 @@ sub AUTOLOAD
 	$sock->send($data);
 }
 
+package IPC::Messaging::Then;
+
+package IPC::Messaging::UDP;
+use Socket;
+use base 'IO::Socket::INET';
+
+sub sendto
+{
+	my ($socket, $data, $addr, $port) = @_;
+	my $iaddr = Socket::inet_aton($addr);
+	send $socket, $data, 0, scalar Socket::sockaddr_in($port, $iaddr);
+}
+
 package IPC::Messaging;
 
 BEGIN { initpid() }
@@ -384,7 +449,7 @@ IPC::Messaging - process handling and message passing, Erlang style
 
 =head1 VERSION
 
-This document describes IPC::Messaging version 0.01_02.
+This document describes IPC::Messaging version 0.01_03.
 
 =head1 SYNOPSIS
 
@@ -404,7 +469,17 @@ This document describes IPC::Messaging version 0.01_02.
  $proc->ping;
  # Message matching
  receive {
-   got _ then {
+   # matching message name
+   got somemsg => then {
+   };
+   # matching message name and sender
+   got pong => $proc => then {
+   };
+   # matching message name and content
+   got msg => x => 1 => then {
+   };
+   # matching any message
+   got _ => then {
      my ($message, $message_data, $from) = @_;
      print "$$: got $message from $from\n";
  	# $_ is the same as $from:
