@@ -1,5 +1,8 @@
 Revision history for IPC::Messaging
 
+0.01_04  Tue Jun  5 22:22:01 2007
+       Add support for custom functional filters.
+
 0.01_03  Sat May 12 23:15:53 2007
        Change syntax for message matching.
        Add UDP sockets support.

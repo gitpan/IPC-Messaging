@@ -5,6 +5,7 @@ Makefile.PL
 README
 devel/code-from-synopsis
 devel/ex
+devel/filter-match
 devel/ping-pong
 devel/tt
 devel/udp

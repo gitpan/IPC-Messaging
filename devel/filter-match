@@ -1,0 +1,31 @@
+#! /usr/bin/perl
+use lib qw(lib ../lib);
+use IPC::Messaging;
+
+sub has_42
+{
+	my ($m,$d) = @_;
+	return grep { $_ eq 42 } values %$d;
+}
+
+my $proc = spawn {
+  receive {
+	got _ => \&has_42 => then {
+		print "42!\n";
+	};
+    got done => then {
+		exit;
+    };
+	got _ => then {
+		print "not 42\n";
+	};
+  } while 1;
+};
+
+$proc->ping(i => 42);
+$proc->ping(i => 43);
+$proc->ping(n => 42);
+$proc->done;
+receive {
+  got _ => then { exit; };
+};

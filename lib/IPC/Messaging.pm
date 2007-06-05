@@ -13,7 +13,7 @@ use Time::HiRes;
 use IO::Select;
 use Carp;
 
-$VERSION = '0.01_03';
+$VERSION = '0.01_04';
 sub spawn (&);
 sub receive (&);
 sub got;
@@ -105,6 +105,9 @@ sub run_queue
 			}
 			next unless $match;
 			debug "MATCH $m->{m}!\n";
+			if ($pat->{filter}) {
+				next unless $pat->{filter}->($m->{m}, $m->{d});
+			}
 			splice @msg_queue, $i, 1;
 			my $proc_or_sock = $m->{sock} || ($m->{f} ? IPC::Messaging::Process->_new($m->{f}) : undef);
 			$_ = $proc_or_sock;
@@ -308,6 +311,11 @@ sub got
 		}
 	}
 	if (@p) {
+		if (UNIVERSAL::isa($p[0], "CODE")) {
+			$pat->{filter} = shift @p;
+		}
+	}
+	if (@p) {
 		if (UNIVERSAL::isa($p[0], "HASH")) {
 			die "invalid \"got\" syntax: unexpected hashref" unless @p == 1;
 			@p = %{$p[0]};
@@ -449,7 +457,7 @@ IPC::Messaging - process handling and message passing, Erlang style
 
 =head1 VERSION
 
-This document describes IPC::Messaging version 0.01_03.
+This document describes IPC::Messaging version 0.01_04.
 
 =head1 SYNOPSIS
 
@@ -477,6 +485,9 @@ This document describes IPC::Messaging version 0.01_03.
    };
    # matching message name and content
    got msg => x => 1 => then {
+   };
+   # matching with a custom filter
+   got msg => \&is_something => then {
    };
    # matching any message
    got _ => then {

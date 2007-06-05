@@ -23,4 +23,4 @@ requires:
   JSON::XS: 0
   Time::HiRes: 0
   perl: 5.6.0
-version: 0.01_03
+version: 0.01_04
