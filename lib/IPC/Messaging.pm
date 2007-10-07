@@ -8,19 +8,20 @@ use vars qw(@EXPORT $VERSION);
 use B::Generate;
 use IO::Socket::UNIX;
 use IO::Socket::INET;
-use JSON::XS;
+use Storable;
 use Time::HiRes;
 use IO::Select;
 use Carp;
 
-$VERSION = '0.01_04';
+$VERSION = '0.01_05';
 sub spawn (&);
 sub receive (&);
+sub receive_loop (&);
 sub got;
 sub then (&);
 sub after ($$);
 
-@EXPORT = qw(spawn receive got then after);
+@EXPORT = qw(spawn receive receive_loop got then after);
 
 my $MAX_DGRAM_SIZE = 16384;
 my $TCP_READ_SIZE  = 65536;
@@ -111,7 +112,7 @@ sub run_queue
 			splice @msg_queue, $i, 1;
 			my $proc_or_sock = $m->{sock} || ($m->{f} ? IPC::Messaging::Process->_new($m->{f}) : undef);
 			$_ = $proc_or_sock;
-			${$pat->{then}}->($m->{m}, $m->{d}, $proc_or_sock);
+			my $ignore = ${$pat->{then}}->($m->{m}, $m->{d}, $proc_or_sock);
 			return 1;
 		}
 	}
@@ -129,7 +130,8 @@ sub pickup_one_message
 			$my_sock->recv($data, $MAX_DGRAM_SIZE);
 			return unless $data;
 			debug "$$: got something:\n\t$data\n";
-			my $msg = eval { from_json($data) };
+			my $msg = eval { Storable::thaw($data) };
+			debug "$$: cannot thaw: $@\n" if !$msg && $@;
 			return unless $msg;
 			return unless $msg->{s} && $msg->{s} eq $secret && $msg->{m} && $msg->{f};
 			$msg->{d} ||= {};
@@ -214,7 +216,6 @@ sub tcp_server
 		LocalPort => $port,
 		Proto     => "tcp",
 		ReuseAddr => 1,
-		ReusePort => 1,
 	) or die $@;
 	$read_socks{$sock->fileno} = {
 		sock => $sock,
@@ -232,7 +233,6 @@ sub udp
 		LocalPort => $port,
 		($bind ? (LocalAddr => $bind) : ()),
 		ReuseAddr => 1,
-		ReusePort => 1,
 	) or die $@;
 	$read_socks{$sock->fileno} = {
 		sock => $sock,
@@ -241,12 +241,11 @@ sub udp
 	return $sock;
 }
 
-sub receive (&)
+sub receive_parse
 {
 	my ($rsub) = @_;
 	die "internal error: non-empty \$recv" if $recv;
 	my $r = $recv = { then_balance => 0 };
-	debug "$$: receive\n";
 	eval { $rsub->(); };
 	$recv = undef;
 	die $@ if $@;
@@ -254,6 +253,12 @@ sub receive (&)
 	unless ($r->{pats} || $r->{timeout}) {
 		die "an empty \"receive\"";
 	}
+	$r;
+}
+
+sub receive_once
+{
+	my ($r) = @_;
 	my $start = Time::HiRes::time;
 	while (1) {
 		if (!$i_am_root && !kill 0, $root) {
@@ -278,7 +283,18 @@ sub receive (&)
 			last;
 		}
 	}
-	debug "$$: /receive\n";
+}
+
+sub receive (&)
+{
+	my $r = receive_parse(@_);
+	receive_once($r);
+}
+
+sub receive_loop (&)
+{
+	my $r = receive_parse(@_);
+	receive_once($r) while 1;
 }
 
 sub got
@@ -347,6 +363,13 @@ sub after ($$)
 	$recv->{timeout} = [$t, $then];
 }
 
+sub timer
+{
+	my (undef, $interval, %msg) = @_;
+	die "timers are not implemented yet\n";
+	return IPC::Messaging::Timer->new($interval, %msg);
+}
+
 sub global_init
 {
 	$secret = int(rand(10000))+1;
@@ -372,9 +395,9 @@ sub initpid
 		Type      => SOCK_DGRAM)
 	or die $@;
 	$my_sock_fileno = $my_sock->fileno;
-	%their_sock   = ();
-	@msg_queue    = ();
-	%read_socks = ();
+	%their_sock       = ();
+	@msg_queue        = ();
+	%read_socks       = ();
 }
 
 package IPC::Messaging::Process;
@@ -382,7 +405,7 @@ use warnings;
 use strict;
 use vars qw($AUTOLOAD);
 use IO::Socket::UNIX;
-use JSON::XS ();
+use Storable;
 
 use overload '0+'  => \&_numify;
 use overload '""'  => \&_stringify;
@@ -418,7 +441,7 @@ sub AUTOLOAD
 		s => $secret,
 		d => {@_},
 	};
-	my $data = JSON::XS::to_json($m);
+	my $data = Storable::freeze($m);
 	my $sock = $their_sock{"$proc"};
 	unless ($sock) {
 		$sock = $their_sock{"$proc"} = IO::Socket::UNIX->new(
@@ -444,6 +467,29 @@ sub sendto
 	send $socket, $data, 0, scalar Socket::sockaddr_in($port, $iaddr);
 }
 
+package IPC::Messaging::Timer;
+
+our $COUNT;
+our %ACTIVE;
+our %SUSPENDED;
+
+sub new
+{
+	my ($class, $interval, %msg) = @_;
+
+	my $me = {
+		interval => $interval,
+		start    => Time::HiRes::time,
+		id       => ++$COUNT,
+	};
+}
+
+sub reset
+{
+	my ($me) = @_;
+	$me->{start} = Time::HiRes::time;
+}
+
 package IPC::Messaging;
 
 BEGIN { initpid() }
@@ -457,7 +503,7 @@ IPC::Messaging - process handling and message passing, Erlang style
 
 =head1 VERSION
 
-This document describes IPC::Messaging version 0.01_04.
+This document describes IPC::Messaging version 0.01_05.
 
 =head1 SYNOPSIS
 

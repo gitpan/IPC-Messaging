@@ -1,5 +1,12 @@
 Revision history for IPC::Messaging
 
+0.01_05  Sun Oct  7 15:48:46 2007
+       Add receive_loop {} as a convenience wrapper for receive {} while 1.
+       Remove ReusePort's usage.
+       Use ole good Storable instead of JSON::XS for serialization.
+       Call processing sub in the scalar context.
+       Incomplete implementation of timers.
+
 0.01_04  Tue Jun  5 22:22:01 2007
        Add support for custom functional filters.
 

@@ -1,4 +1,5 @@
 #! /usr/bin/perl
+# $Id: filter-match,v 1.2 2007/06/21 12:46:37 tobez Exp $
 use lib qw(lib ../lib);
 use IPC::Messaging;
 
@@ -9,7 +10,7 @@ sub has_42
 }
 
 my $proc = spawn {
-  receive {
+  receive_loop {
 	got _ => \&has_42 => then {
 		print "42!\n";
 	};
@@ -19,7 +20,7 @@ my $proc = spawn {
 	got _ => then {
 		print "not 42\n";
 	};
-  } while 1;
+  };
 };
 
 $proc->ping(i => 42);

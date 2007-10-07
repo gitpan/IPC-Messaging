@@ -5,15 +5,16 @@ use lib qw(lib ../lib);
 use IPC::Messaging;
 
 my $u = IPC::Messaging->udp(5550);
-while (1) {
-	receive {
-		got udp => $u => then {
-			my ($m, $d, $sock) = @_;
-			print "got $m: $d->{data} from $d->{from}:$d->{from_port}\n";
-			$sock->sendto("heps\n", $d->{from}, $d->{from_port});
-		};
-		after 5 => then {
-			print "boing\n";
-		};
+receive_loop {
+	got udp => $u => then {
+		my ($m, $d, $sock) = @_;
+		print "got $m: $d->{data} from $d->{from}:$d->{from_port}\n";
+		$sock->sendto("heps\n", $d->{from}, $d->{from_port});
 	};
-}
+	got _ => then {
+		print "$_[0]\n";
+	};
+	after 5 => then {
+		print "boing\n";
+	};
+};

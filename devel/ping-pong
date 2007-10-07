@@ -7,25 +7,21 @@ use IPC::Messaging;
 print "$$: I am the main one\n";
 my $p = spawn {
 	print "$$: started\n";
-	while (1) {
-		receive {
-			got ping => then {
-				print "$$: ping from $_\n";
-				$_->pong;
-			};
-			got done => then {
-				while (1) {
-					receive {
-						got _ => then { print "$_[0]\n"; };
-						after 0 => then {
-							print "$$: exiting\n";
-							exit;
-						};
-					};
-				}
+	receive_loop {
+		got ping => then {
+			print "$$: ping from $_\n";
+			$_->pong;
+		};
+		got done => then {
+			receive_loop {
+				got _ => then { print "$_[0]\n"; };
+				after 0 => then {
+					print "$$: exiting\n";
+					exit;
+				};
 			};
 		};
-	}
+	};
 };
 
 $p->blah;
