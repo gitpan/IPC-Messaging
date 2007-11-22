@@ -8,6 +8,7 @@ devel/ex
 devel/filter-match
 devel/ping-pong
 devel/tail-f
+devel/tcpl
 devel/tt
 devel/udp
 inc/Module/AutoInstall.pm

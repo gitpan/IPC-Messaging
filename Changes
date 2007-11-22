@@ -1,5 +1,9 @@
 Revision history for IPC::Messaging
 
+0.01_06  Thu Nov 22 15:10:33 2007
+       Add optional by_line mode for TCP servers.
+       Add optional listen_queue parameter for TCP servers.
+
 0.01_05  Sun Oct  7 15:48:46 2007
        Add receive_loop {} as a convenience wrapper for receive {} while 1.
        Remove ReusePort's usage.

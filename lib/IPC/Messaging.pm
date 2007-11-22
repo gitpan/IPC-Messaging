@@ -13,7 +13,7 @@ use Time::HiRes;
 use IO::Select;
 use Carp;
 
-$VERSION = '0.01_05';
+$VERSION = '0.01_06';
 sub spawn (&);
 sub receive (&);
 sub receive_loop (&);
@@ -137,13 +137,14 @@ sub pickup_one_message
 			$msg->{d} ||= {};
 			push @msg_queue, $msg;
 		} elsif ($read_socks{$fd}) {
-			if ($read_socks{$fd}->{type} eq "tcp_listen") {
-				my $sock = $read_socks{$fd}->{sock}->accept;
+			my $s = $read_socks{$fd};
+			if ($s->{type} eq "tcp_listen") {
+				my $sock = $s->{sock}->accept;
 				my $from = $sock->peerhost;
 				my $from_port = $sock->peerport;
 				push @msg_queue, {
 					m     => "tcp_connect",
-					fsock => $read_socks{$fd}->{sock},
+					fsock => $s->{sock},
 					sock  => $sock,
 					d     => {
 						from      => $from,
@@ -155,35 +156,61 @@ sub pickup_one_message
 					type      => "tcp",
 					from      => $from,
 					from_port => $from_port,
+					by_line   => $s->{by_line},
+					buf       => "",
 				};
-			} elsif ($read_socks{$fd}->{type} eq "tcp") {
+			} elsif ($s->{type} eq "tcp") {
 				my $d = "";
-				my $sock = $read_socks{$fd}->{sock};
+				my $sock = $s->{sock};
 				my $len = sysread $sock, $d, $TCP_READ_SIZE;
 				if ($len <= 0) {
+					if ($s->{buf} && $s->{by_line}) {
+						push @msg_queue, {
+							m    => "tcp_line",
+							sock => $sock,
+							d    => {
+								from      => $s->{from},
+								from_port => $s->{from_port},
+								line      => $s->{buf},
+							},
+						};
+					}
 					push @msg_queue, {
 						m    => "tcp_disconnect",
 						d    => {
-							from      => $read_socks{$fd}->{from},
-							from_port => $read_socks{$fd}->{from_port},
+							from      => $s->{from},
+							from_port => $s->{from_port},
 						},
 					};
 					delete $read_socks{$fd};
 					$sock->close;
+				} elsif ($s->{by_line}) {
+					$s->{buf} .= $d;
+					while ($s->{buf} =~ s/^(.*?\n)//) {
+						push @msg_queue, {
+							m    => "tcp_line",
+							sock => $sock,
+							d    => {
+								from      => $s->{from},
+								from_port => $s->{from_port},
+								line      => $1,
+							},
+						};
+					}
 				} else {
 					push @msg_queue, {
 						m    => "tcp_data",
 						sock => $sock,
 						d    => {
-							from      => $read_socks{$fd}->{from},
-							from_port => $read_socks{$fd}->{from_port},
+							from      => $s->{from},
+							from_port => $s->{from_port},
 							data      => $d,
 						},
 					};
 				}
-			} elsif ($read_socks{$fd}->{type} eq "udp") {
+			} elsif ($s->{type} eq "udp") {
 				my $d = "";
-				my $sock = $read_socks{$fd}->{sock};
+				my $sock = $s->{sock};
 				$sock->recv($d, $MAX_DGRAM_SIZE);
 				return unless $d;
 				debug "$$: got udp\n";
@@ -209,17 +236,18 @@ sub pickup_one_message
 
 sub tcp_server
 {
-	my (undef, $port, $bind) = @_;
+	my (undef, $port, %p) = @_;
 	my $sock = IO::Socket::INET->new(
-		Listen    => 5,
-		($bind ? (LocalAddr => $bind) : ()),
+		Listen    => $p{listen_queue} || 5,
+		($p{bind} ? (LocalAddr => $p{bind}) : ()),
 		LocalPort => $port,
 		Proto     => "tcp",
 		ReuseAddr => 1,
 	) or die $@;
 	$read_socks{$sock->fileno} = {
-		sock => $sock,
-		type => "tcp_listen",
+		sock    => $sock,
+		type    => "tcp_listen",
+		by_line => $p{by_line},
 	};
 	return $sock;
 }
@@ -503,7 +531,7 @@ IPC::Messaging - process handling and message passing, Erlang style
 
 =head1 VERSION
 
-This document describes IPC::Messaging version 0.01_05.
+This document describes IPC::Messaging version 0.01_06.
 
 =head1 SYNOPSIS
 

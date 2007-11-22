@@ -23,4 +23,4 @@ requires:
   Storable: 0
   Time::HiRes: 0
   perl: 5.6.0
-version: 0.01_05
+version: 0.01_06

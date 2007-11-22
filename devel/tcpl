@@ -1,0 +1,22 @@
+#! /usr/bin/perl
+use strict;
+use warnings;
+use lib qw(lib ../lib);
+use IPC::Messaging;
+
+IPC::Messaging->tcp_server(1111, by_line => 1);
+receive_loop {
+	got tcp_connect => then {
+		print "connect from $_[1]->{from}\n";
+		print $_ "hi\n";
+	};
+	got tcp_data => then {
+		print "THIS SHOULD NEVER HAPPEN got data: $_[1]->{data}\n";
+	};
+	got tcp_line => then {
+		print "got line: $_[1]->{line}";
+	};
+	got tcp_disconnect => then {
+		print "disconnect from $_[1]->{from}\n";
+	};
+};
