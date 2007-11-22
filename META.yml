@@ -15,12 +15,15 @@ no_index:
     - devel
     - inc
     - t
+recommends: 
+  IO::KQueue: 0
 requires: 
   B::Generate: 0
   IO::Select: 0
   IO::Socket::INET: 0
   IO::Socket::UNIX: 0
+  Module::Load::Conditional: 0
   Storable: 0
   Time::HiRes: 0
   perl: 5.6.0
-version: 0.01_06
+version: 0.01_07

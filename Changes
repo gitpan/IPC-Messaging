@@ -1,5 +1,8 @@
 Revision history for IPC::Messaging
 
+0.01_07  Thu Nov 22 22:43:00 2007
+       Use IO::KQueue instead of IO::Select if available.
+
 0.01_06  Thu Nov 22 15:10:33 2007
        Add optional by_line mode for TCP servers.
        Add optional listen_queue parameter for TCP servers.

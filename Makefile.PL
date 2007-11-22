@@ -1,5 +1,5 @@
-# Load the Module::Install bundled in ./inc/
 use inc::Module::Install;
+BEGIN { require 5.006 } # please CPAN::Reporter
 
 # Define metadata
 name            'IPC-Messaging';
@@ -13,6 +13,9 @@ requires        'IO::Socket::INET' => 0;
 requires        'Storable'         => 0;
 requires        'Time::HiRes'      => 0;
 requires        'IO::Select'       => 0;
+requires        'Module::Load::Conditional' => 0;
+
+recommends      'IO::KQueue'       => 0;
 
 build_requires  'Test::More'       => 0;
 

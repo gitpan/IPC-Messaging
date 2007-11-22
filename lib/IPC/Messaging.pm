@@ -10,10 +10,10 @@ use IO::Socket::UNIX;
 use IO::Socket::INET;
 use Storable;
 use Time::HiRes;
-use IO::Select;
 use Carp;
+use Module::Load::Conditional "can_load";
 
-$VERSION = '0.01_06';
+$VERSION = '0.01_07';
 sub spawn (&);
 sub receive (&);
 sub receive_loop (&);
@@ -35,6 +35,9 @@ my %their_sock;
 my @msg_queue;
 my $recv;
 my %read_socks;
+my $use_kqueue;
+my $use_select;
+my $kq;
 
 sub debug
 {
@@ -118,13 +121,34 @@ sub run_queue
 	}
 }
 
+sub watch_fd
+{
+	my ($fd) = @_;
+	if ($kq) {
+		$kq->EV_SET($fd, &IO::KQueue::EVFILT_READ, &IO::KQueue::EV_ADD, 0, 0);
+	}
+}
+
+sub unwatch_fd
+{
+	my ($fd) = @_;
+	delete $read_socks{$fd};
+	if ($kq) {
+		$kq->EV_SET($fd, &IO::KQueue::EVFILT_READ, &IO::KQueue::EV_DELETE, 0, 0);
+	}
+}
+
 sub pickup_one_message
 {
 	my ($t) = @_;
 	debug "$$: select $my_sock $t\n";
-	my @r = IO::Select->new($my_sock,map { $_->{sock} } values %read_socks)->can_read($t);
-	for my $r (@r) {
-		my $fd = $r->fileno;
+	my @fd;
+	if ($use_kqueue) {
+		@fd = map { $_->[&IO::KQueue::KQ_IDENT] } $kq->kevent($t*1000);
+	} else {
+		@fd = map { $_->fileno } IO::Select->new($my_sock,map { $_->{sock} } values %read_socks)->can_read($t);
+	}
+	for my $fd (@fd) {
 		if ($fd == $my_sock_fileno) {
 			my $data = "";
 			$my_sock->recv($data, $MAX_DGRAM_SIZE);
@@ -159,6 +183,7 @@ sub pickup_one_message
 					by_line   => $s->{by_line},
 					buf       => "",
 				};
+				watch_fd($sock->fileno);
 			} elsif ($s->{type} eq "tcp") {
 				my $d = "";
 				my $sock = $s->{sock};
@@ -182,7 +207,7 @@ sub pickup_one_message
 							from_port => $s->{from_port},
 						},
 					};
-					delete $read_socks{$fd};
+					unwatch_fd($fd);
 					$sock->close;
 				} elsif ($s->{by_line}) {
 					$s->{buf} .= $d;
@@ -226,9 +251,9 @@ sub pickup_one_message
 			} else {
 				# XXX
 				# Something is fishy, we don't know what to do with this
-				# socket, so delete it from %read_socks in order to not
-				# have the "always ready" condition.
-				delete $read_socks{$fd};
+				# socket, so unwatch it in order to not have the "always ready"
+				# condition.
+				unwatch_fd($fd);
 			}
 		}
 	}
@@ -249,6 +274,7 @@ sub tcp_server
 		type    => "tcp_listen",
 		by_line => $p{by_line},
 	};
+	watch_fd($sock->fileno);
 	return $sock;
 }
 
@@ -266,6 +292,7 @@ sub udp
 		sock => $sock,
 		type => "udp",
 	};
+	watch_fd($sock->fileno);
 	return $sock;
 }
 
@@ -406,6 +433,9 @@ sub global_init
 	$messaging_dir = "/tmp/ipc-messaging/$root";
 	system("rm -rf $messaging_dir") if -e $messaging_dir && !-l $messaging_dir;
 	system("mkdir -p $messaging_dir");
+	$use_kqueue = can_load(modules => { "IO::KQueue" => 0 });
+	$use_select = !$use_kqueue && can_load(modules => { "IO::Select" => 0 });
+	die "cannot find neither IO::KQueue nor IO::Select" unless $use_kqueue || $use_select;
 }
 
 sub initpid
@@ -418,11 +448,14 @@ sub initpid
 	$$ = $this;
 	$pid->FLAGS($pid->FLAGS | B::SVf_READONLY);
 
+	$kq = IO::KQueue->new if $use_kqueue;
+
 	$my_sock = IO::Socket::UNIX->new(
 		Local     => "$messaging_dir/$$.sock",
 		Type      => SOCK_DGRAM)
 	or die $@;
 	$my_sock_fileno = $my_sock->fileno;
+	watch_fd($my_sock_fileno);
 	%their_sock       = ();
 	@msg_queue        = ();
 	%read_socks       = ();
@@ -531,7 +564,7 @@ IPC::Messaging - process handling and message passing, Erlang style
 
 =head1 VERSION
 
-This document describes IPC::Messaging version 0.01_06.
+This document describes IPC::Messaging version 0.01_07.
 
 =head1 SYNOPSIS
 
