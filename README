@@ -1,4 +1,4 @@
-IPC-Messaging version 0.01_07
+IPC-Messaging version 0.01_08
 
 IPC::Messaging - process handling and message passing, Erlang style
 
@@ -21,14 +21,14 @@ To install this module, run the following commands:
 
 DEPENDENCIES
 
-Perl 5.8.2 or above, B::Generate, JSON::XS.
+Perl 5.6.0 or above, B::Generate, Module::Load::Conditional.
 
 
 COPYRIGHT AND LICENCE
 
 Copyright (C) 2007, Anton Berezin
 
-The software known as DBIx::Perlish is distributed under the following
+The software known as IPC::Messaging is distributed under the following
 terms:
 
 Copyright (C) 2007 Anton Berezin. All rights reserved.

@@ -13,7 +13,7 @@ use Time::HiRes;
 use Carp;
 use Module::Load::Conditional "can_load";
 
-$VERSION = '0.01_07';
+$VERSION = '0.01_08';
 sub spawn (&);
 sub receive (&);
 sub receive_loop (&);
@@ -47,7 +47,7 @@ sub debug
 sub spawn (&)
 {
 	my ($psub) = @_;
-	my $pid = fork;
+	my $pid = CORE::fork;
 	die "unable to fork: $!" unless defined $pid;
 	if ($pid) {
 		# parent
@@ -160,6 +160,10 @@ sub pickup_one_message
 			return unless $msg->{s} && $msg->{s} eq $secret && $msg->{m} && $msg->{f};
 			$msg->{d} ||= {};
 			push @msg_queue, $msg;
+			if ($msg->{m} eq "EXIT") {
+				use POSIX ":sys_wait_h";
+				waitpid($msg->{f}, WNOHANG);
+			}
 		} elsif ($read_socks{$fd}) {
 			my $s = $read_socks{$fd};
 			if ($s->{type} eq "tcp_listen") {
@@ -553,7 +557,17 @@ sub reset
 
 package IPC::Messaging;
 
-BEGIN { initpid() }
+BEGIN {
+	initpid();
+	*CORE::GLOBAL::fork = sub {
+		my $r = fork;
+		if (defined $r && !$r) {
+			$secret = 0;
+			initpid();
+		}
+		$r;
+	};
+}
 
 1;
 __END__
@@ -564,7 +578,7 @@ IPC::Messaging - process handling and message passing, Erlang style
 
 =head1 VERSION
 
-This document describes IPC::Messaging version 0.01_07.
+This document describes IPC::Messaging version 0.01_08.
 
 =head1 SYNOPSIS
 
@@ -633,7 +647,7 @@ poorly documented.
 
 =head1 DEPENDENCIES
 
-Perl 5.8.2 or above, B::Generate, JSON::XS.
+Perl 5.6.0 or above, B::Generate, Module::Load::Conditional.
 
 =head1 INCOMPATIBILITIES
 

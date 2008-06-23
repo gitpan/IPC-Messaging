@@ -1,10 +1,11 @@
 --- 
 abstract: process handling and message passing, Erlang style
-author: Anton Berezin  C<< <tobez@tobez.org> >>
+author: 
+  - Anton Berezin  C<< <tobez@tobez.org> >>
 build_requires: 
   Test::More: 0
 distribution_type: module
-generated_by: Module::Install version 0.67
+generated_by: Module::Install version 0.68
 license: bsd
 meta-spec: 
   url: http://module-build.sourceforge.net/META-spec-v1.3.html
@@ -26,4 +27,4 @@ requires:
   Storable: 0
   Time::HiRes: 0
   perl: 5.6.0
-version: 0.01_07
+version: 0.01_08
