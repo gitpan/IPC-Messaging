@@ -1,5 +1,8 @@
 Revision history for IPC::Messaging
 
+0.01_09 Tue Aug  5 22:41:07 2008
+       Add tcp_client functionality.
+
 0.01_08 Mon Jun 23 10:40:13 2008
        Reap zombies.
        Robin Redeker: remove JSON::XS from the list of dependencies.

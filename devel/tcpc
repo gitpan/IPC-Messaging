@@ -1,0 +1,23 @@
+#! /usr/bin/perl
+use strict;
+use warnings;
+use lib qw(lib ../lib);
+use IPC::Messaging;
+
+IPC::Messaging->tcp_client("localhost", 80, by_line => 1);
+receive_loop {
+	got tcp_connected => then {
+		print "connected to $_[1]->{peer}:$_[1]->{peer_port}\n";
+		print $_ "GET /\n";
+	};
+	got tcp_data => then {
+		print "THIS SHOULD NEVER HAPPEN got data: $_[1]->{data}\n";
+	};
+	got tcp_line => then {
+		print "got line: $_[1]->{line}";
+	};
+	got tcp_disconnect => then {
+		print "disconnected from $_[1]->{from}\n";
+		exit;
+	};
+};

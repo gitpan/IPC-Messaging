@@ -1,5 +1,5 @@
 package IPC::Messaging;
-use 5.006;
+use 5.008;
 use warnings;
 use strict;
 require Exporter;
@@ -13,7 +13,7 @@ use Time::HiRes;
 use Carp;
 use Module::Load::Conditional "can_load";
 
-$VERSION = '0.01_08';
+$VERSION = '0.01_09';
 sub spawn (&);
 sub receive (&);
 sub receive_loop (&);
@@ -35,6 +35,7 @@ my %their_sock;
 my @msg_queue;
 my $recv;
 my %read_socks;
+my %write_socks;
 my $use_kqueue;
 my $use_select;
 my $kq;
@@ -123,18 +124,24 @@ sub run_queue
 
 sub watch_fd
 {
-	my ($fd) = @_;
+	my ($fd, $write) = @_;
 	if ($kq) {
-		$kq->EV_SET($fd, &IO::KQueue::EVFILT_READ, &IO::KQueue::EV_ADD, 0, 0);
+		if ($write) {
+			$kq->EV_SET($fd, &IO::KQueue::EVFILT_WRITE, &IO::KQueue::EV_ADD, 0, 0);
+		} else {
+			$kq->EV_SET($fd, &IO::KQueue::EVFILT_READ, &IO::KQueue::EV_ADD, 0, 0);
+		}
 	}
 }
 
 sub unwatch_fd
 {
 	my ($fd) = @_;
-	delete $read_socks{$fd};
+	my $rd = delete $read_socks{$fd};
+	my $wr = delete $write_socks{$fd};
 	if ($kq) {
-		$kq->EV_SET($fd, &IO::KQueue::EVFILT_READ, &IO::KQueue::EV_DELETE, 0, 0);
+		$kq->EV_SET($fd, &IO::KQueue::EVFILT_READ, &IO::KQueue::EV_DELETE, 0, 0) if $rd;
+		$kq->EV_SET($fd, &IO::KQueue::EVFILT_WRITE, &IO::KQueue::EV_DELETE, 0, 0) if $wr;
 	}
 }
 
@@ -146,7 +153,10 @@ sub pickup_one_message
 	if ($use_kqueue) {
 		@fd = map { $_->[&IO::KQueue::KQ_IDENT] } $kq->kevent($t*1000);
 	} else {
-		@fd = map { $_->fileno } IO::Select->new($my_sock,map { $_->{sock} } values %read_socks)->can_read($t);
+		my $to_read  = IO::Select->new($my_sock,map { $_->{sock} } values %read_socks);
+		my $to_write = IO::Select->new(map { $_->{sock} } values %write_socks);
+		my ($r,$w) = IO::Select->select($to_read, $to_write, undef, $t);
+		@fd = map { $_->fileno } @$w, @$r;
 	}
 	for my $fd (@fd) {
 		if ($fd == $my_sock_fileno) {
@@ -163,6 +173,30 @@ sub pickup_one_message
 			if ($msg->{m} eq "EXIT") {
 				use POSIX ":sys_wait_h";
 				waitpid($msg->{f}, WNOHANG);
+			}
+		} elsif ($write_socks{$fd}) {
+			my $s = $write_socks{$fd};
+			unwatch_fd($fd);
+			if ($s->{type} eq "tcp_connecting") {
+				my $sock = $s->{sock};
+				my $peer = $sock->peerhost;
+				my $peer_port = $sock->peerport;
+				push @msg_queue, {
+					m     => "tcp_connected",
+					sock  => $sock,
+					d     => {
+						peer      => $peer,
+						peer_port => $peer_port,
+					},
+				};
+				$read_socks{$fd} = {
+					sock      => $s->{sock},
+					type      => "tcp",
+					by_line   => $s->{by_line},
+					from      => $peer,
+					from_port => $peer_port,
+				};
+				watch_fd($fd);
 			}
 		} elsif ($read_socks{$fd}) {
 			my $s = $read_socks{$fd};
@@ -279,6 +313,24 @@ sub tcp_server
 		by_line => $p{by_line},
 	};
 	watch_fd($sock->fileno);
+	return $sock;
+}
+
+sub tcp_client
+{
+	my (undef, $host, $port, %p) = @_;
+	my $sock = IO::Socket::INET->new(
+		Proto     => "tcp",
+		PeerHost  => $host,
+		PeerPort  => $port,
+		Blocking  => 0,
+	) or die $@;
+	$write_socks{$sock->fileno} = {
+		sock    => $sock,
+		type    => "tcp_connecting",
+		by_line => $p{by_line},
+	};
+	watch_fd($sock->fileno, "write");
 	return $sock;
 }
 
@@ -578,7 +630,7 @@ IPC::Messaging - process handling and message passing, Erlang style
 
 =head1 VERSION
 
-This document describes IPC::Messaging version 0.01_08.
+This document describes IPC::Messaging version 0.01_09.
 
 =head1 SYNOPSIS
 
@@ -647,7 +699,7 @@ poorly documented.
 
 =head1 DEPENDENCIES
 
-Perl 5.6.0 or above, B::Generate, Module::Load::Conditional.
+Perl 5.8.4 or above, B::Generate, Module::Load::Conditional.
 
 =head1 INCOMPATIBILITIES
 
@@ -665,7 +717,7 @@ Anton Berezin  C<< <tobez@tobez.org> >>
 
 =head1 LICENSE AND COPYRIGHT
 
-Copyright (c) 2007, Anton Berezin C<< <tobez@tobez.org> >>. All rights reserved.
+Copyright (c) 2007, 2008, Anton Berezin C<< <tobez@tobez.org> >>. All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions
