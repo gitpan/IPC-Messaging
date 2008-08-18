@@ -8,12 +8,13 @@ use vars qw(@EXPORT $VERSION);
 use B::Generate;
 use IO::Socket::UNIX;
 use IO::Socket::INET;
+use Socket qw(:all);
 use Storable;
 use Time::HiRes;
 use Carp;
 use Module::Load::Conditional "can_load";
 
-$VERSION = '0.01_09';
+$VERSION = '0.01_10';
 sub spawn (&);
 sub receive (&);
 sub receive_loop (&);
@@ -181,22 +182,34 @@ sub pickup_one_message
 				my $sock = $s->{sock};
 				my $peer = $sock->peerhost;
 				my $peer_port = $sock->peerport;
-				push @msg_queue, {
-					m     => "tcp_connected",
-					sock  => $sock,
-					d     => {
-						peer      => $peer,
-						peer_port => $peer_port,
-					},
-				};
-				$read_socks{$fd} = {
-					sock      => $s->{sock},
-					type      => "tcp",
-					by_line   => $s->{by_line},
-					from      => $peer,
-					from_port => $peer_port,
-				};
-				watch_fd($fd);
+				my $opt = getsockopt($sock, SOL_SOCKET, SO_ERROR);
+				$opt = unpack("I", $opt) if defined $opt;
+				if ($opt) {
+					push @msg_queue, {
+						m     => "tcp_error",
+						sock  => $sock,
+						d     => {
+							errno => $opt,
+						},
+					};
+				} else {
+					push @msg_queue, {
+						m     => "tcp_connected",
+						sock  => $sock,
+						d     => {
+							peer      => $peer,
+							peer_port => $peer_port,
+						},
+					};
+					$read_socks{$fd} = {
+						sock      => $s->{sock},
+						type      => "tcp",
+						by_line   => $s->{by_line},
+						from      => $peer,
+						from_port => $peer_port,
+					};
+					watch_fd($fd);
+				}
 			}
 		} elsif ($read_socks{$fd}) {
 			my $s = $read_socks{$fd};
@@ -226,7 +239,7 @@ sub pickup_one_message
 				my $d = "";
 				my $sock = $s->{sock};
 				my $len = sysread $sock, $d, $TCP_READ_SIZE;
-				if ($len <= 0) {
+				if (!defined $len || $len <= 0) {
 					if ($s->{buf} && $s->{by_line}) {
 						push @msg_queue, {
 							m    => "tcp_line",
@@ -630,7 +643,7 @@ IPC::Messaging - process handling and message passing, Erlang style
 
 =head1 VERSION
 
-This document describes IPC::Messaging version 0.01_09.
+This document describes IPC::Messaging version 0.01_10.
 
 =head1 SYNOPSIS
 

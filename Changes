@@ -1,5 +1,8 @@
 Revision history for IPC::Messaging
 
+0.01_10 Mon Aug 18 14:29:02 CEST 2008
+       Add tcp_error message for connecting sockets.
+
 0.01_09 Tue Aug  5 22:41:07 2008
        Add tcp_client functionality.
 
