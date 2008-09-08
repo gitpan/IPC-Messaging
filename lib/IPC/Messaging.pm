@@ -14,7 +14,7 @@ use Time::HiRes;
 use Carp;
 use Module::Load::Conditional "can_load";
 
-$VERSION = '0.01_10';
+$VERSION = '0.01_11';
 sub spawn (&);
 sub receive (&);
 sub receive_loop (&);
@@ -499,7 +499,7 @@ sub global_init
 	$secret = int(rand(10000))+1;
 	$root = $$;
 	$i_am_root = 1;
-	$messaging_dir = "/tmp/ipc-messaging/$root";
+	$messaging_dir = "/tmp/ipc-messaging-$>/$root";
 	system("rm -rf $messaging_dir") if -e $messaging_dir && !-l $messaging_dir;
 	system("mkdir -p $messaging_dir");
 	$use_kqueue = can_load(modules => { "IO::KQueue" => 0 });
@@ -643,7 +643,7 @@ IPC::Messaging - process handling and message passing, Erlang style
 
 =head1 VERSION
 
-This document describes IPC::Messaging version 0.01_10.
+This document describes IPC::Messaging version 0.01_11.
 
 =head1 SYNOPSIS
 
