@@ -16,6 +16,7 @@ requires        'IO::Select'       => 0;
 requires        'Module::Load::Conditional' => 0;
 
 recommends      'IO::KQueue'       => 0;
+recommends      'IO::Epoll'        => 0;
 
 build_requires  'Test::More'       => 0;
 

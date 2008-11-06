@@ -14,7 +14,7 @@ use Time::HiRes;
 use Carp;
 use Module::Load::Conditional "can_load";
 
-$VERSION = '0.01_11';
+$VERSION = '0.01_12';
 sub spawn (&);
 sub receive (&);
 sub receive_loop (&);
@@ -37,9 +37,9 @@ my @msg_queue;
 my $recv;
 my %read_socks;
 my %write_socks;
-my $use_kqueue;
-my $use_select;
+my ($use_kqueue, $use_epoll, $use_select);
 my $kq;
+my $epfd;
 
 sub debug
 {
@@ -132,6 +132,12 @@ sub watch_fd
 		} else {
 			$kq->EV_SET($fd, &IO::KQueue::EVFILT_READ, &IO::KQueue::EV_ADD, 0, 0);
 		}
+	} elsif ($epfd) {
+		if ($write) {
+			IO::Epoll::epoll_ctl($epfd, &IO::Epoll::EPOLL_CTL_ADD, $fd, &IO::Epoll::EPOLLOUT);
+		} else {
+			IO::Epoll::epoll_ctl($epfd, &IO::Epoll::EPOLL_CTL_ADD, $fd, &IO::Epoll::EPOLLIN);
+		}
 	}
 }
 
@@ -143,6 +149,9 @@ sub unwatch_fd
 	if ($kq) {
 		$kq->EV_SET($fd, &IO::KQueue::EVFILT_READ, &IO::KQueue::EV_DELETE, 0, 0) if $rd;
 		$kq->EV_SET($fd, &IO::KQueue::EVFILT_WRITE, &IO::KQueue::EV_DELETE, 0, 0) if $wr;
+	} elsif ($epfd) {
+		IO::Epoll::epoll_ctl($epfd, &IO::Epoll::EPOLL_CTL_DEL, $fd, &IO::Epoll::EPOLLIN) if $rd;
+		IO::Epoll::epoll_ctl($epfd, &IO::Epoll::EPOLL_CTL_DEL, $fd, &IO::Epoll::EPOLLOUT) if $wr;
 	}
 }
 
@@ -152,7 +161,11 @@ sub pickup_one_message
 	debug "$$: select $my_sock $t\n";
 	my @fd;
 	if ($use_kqueue) {
+		# XXX errors are ignored, bad
 		@fd = map { $_->[&IO::KQueue::KQ_IDENT] } $kq->kevent($t*1000);
+	} elsif ($use_epoll) {
+		# XXX errors are ignored, bad
+		@fd = map { $_->[0] } @{IO::Epoll::epoll_wait($epfd, 100, $t*1000) || []};
 	} else {
 		my $to_read  = IO::Select->new($my_sock,map { $_->{sock} } values %read_socks);
 		my $to_write = IO::Select->new(map { $_->{sock} } values %write_socks);
@@ -503,8 +516,10 @@ sub global_init
 	system("rm -rf $messaging_dir") if -e $messaging_dir && !-l $messaging_dir;
 	system("mkdir -p $messaging_dir");
 	$use_kqueue = can_load(modules => { "IO::KQueue" => 0 });
-	$use_select = !$use_kqueue && can_load(modules => { "IO::Select" => 0 });
-	die "cannot find neither IO::KQueue nor IO::Select" unless $use_kqueue || $use_select;
+	$use_epoll = can_load(modules => { "IO::Epoll" => 0 });
+	$use_select = !$use_kqueue && !$use_epoll && can_load(modules => { "IO::Select" => 0 });
+	die "cannot find neither IO::KQueue nor IO::Epoll nor IO::Select"
+		unless $use_kqueue || $use_epoll || $use_select;
 }
 
 sub initpid
@@ -518,6 +533,7 @@ sub initpid
 	$pid->FLAGS($pid->FLAGS | B::SVf_READONLY);
 
 	$kq = IO::KQueue->new if $use_kqueue;
+	$epfd = IO::Epoll::epoll_create(100) if $use_epoll;
 
 	$my_sock = IO::Socket::UNIX->new(
 		Local     => "$messaging_dir/$$.sock",
@@ -643,7 +659,7 @@ IPC::Messaging - process handling and message passing, Erlang style
 
 =head1 VERSION
 
-This document describes IPC::Messaging version 0.01_11.
+This document describes IPC::Messaging version 0.01_12.
 
 =head1 SYNOPSIS
 

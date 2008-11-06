@@ -1,5 +1,8 @@
 Revision history for IPC::Messaging
 
+0.01_12 Thu Nov  6 10:06:09 CET 2008
+       Use IO::Epoll instead of IO::Select if available.
+
 0.01_11 Mon Sep  8 09:41:51 CEST 2008
        Use temporary dir per user.
 
