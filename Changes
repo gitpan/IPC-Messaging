@@ -1,5 +1,8 @@
 Revision history for IPC::Messaging
 
+0.01_13 Sun Nov 14 20:19:06 CET 2010
+       Reap zombies better.
+
 0.01_12 Thu Nov  6 10:06:09 CET 2008
        Use IO::Epoll instead of IO::Select if available.
 

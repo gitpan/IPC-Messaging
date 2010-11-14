@@ -1,4 +1,4 @@
-IPC-Messaging version 0.01_12
+IPC-Messaging version 0.01_13
 
 IPC::Messaging - process handling and message passing, Erlang style
 
@@ -26,12 +26,12 @@ Perl 5.6.0 or above, B::Generate, Module::Load::Conditional.
 
 COPYRIGHT AND LICENCE
 
-Copyright (C) 2007, 2008, Anton Berezin
+Copyright (C) 2007-2010, Anton Berezin
 
 The software known as IPC::Messaging is distributed under the following
 terms:
 
-Copyright (C) 2007, 2008 Anton Berezin. All rights reserved.
+Copyright (C) 2007-2010 Anton Berezin. All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions

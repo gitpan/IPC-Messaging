@@ -3,7 +3,9 @@ use strict;
 use warnings;
 use lib qw(lib ../lib);
 use IPC::Messaging;
+use Time::HiRes;
 
+#$SIG{CHLD} = 'IGNORE';
 print "$$: I am the main one\n";
 my $p = spawn {
 	print "$$: started\n";
@@ -38,6 +40,28 @@ for (1..4) {
 $p->done;
 receive {
 	got _ => then {
-		print "$$: $_[0] from $_\n";
+		my $pid = 0+"$_";
+		print "$$: $_[0] from $pid\n";
+		if (kill 0, $pid) {
+			print "$$: (and $pid is still alive)\n";
+		} else {
+			print "$$: (and $pid is truly dead)\n";
+		}
+		Time::HiRes::sleep(0.05);
+		receive {
+			got _ => then {
+				print "$$: something arrived unexpectedly\n";
+			};
+			after 0 => then {
+				if (kill 0, $pid) {
+					print "$$: (after receive, $pid is still alive)\n";
+				} else {
+					print "$$: (after receive, $pid is truly dead)\n";
+				}
+			};
+		};
+		use POSIX ":sys_wait_h";
+		my $x = waitpid(0+"$_", WNOHANG);
+		print "waitpid X: $x\n";
 	};
 };

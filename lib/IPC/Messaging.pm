@@ -13,8 +13,9 @@ use Storable;
 use Time::HiRes;
 use Carp;
 use Module::Load::Conditional "can_load";
+use POSIX ":sys_wait_h";
 
-$VERSION = '0.01_12';
+$VERSION = '0.01_13';
 sub spawn (&);
 sub receive (&);
 sub receive_loop (&);
@@ -34,6 +35,7 @@ my $my_sock;
 my $my_sock_fileno;
 my %their_sock;
 my @msg_queue;
+my @processes_to_reap;
 my $recv;
 my %read_socks;
 my %write_socks;
@@ -155,11 +157,22 @@ sub unwatch_fd
 	}
 }
 
+sub reap_dead_kids
+{
+	my @to_reap = @processes_to_reap;
+	@processes_to_reap = ();
+	for my $pid (@to_reap) {
+		my $x = waitpid($pid, WNOHANG);
+		push @processes_to_reap, $pid if $x == 0;
+	}
+}
+
 sub pickup_one_message
 {
 	my ($t) = @_;
 	debug "$$: select $my_sock $t\n";
 	my @fd;
+	reap_dead_kids() if @processes_to_reap;
 	if ($use_kqueue) {
 		# XXX errors are ignored, bad
 		@fd = map { $_->[&IO::KQueue::KQ_IDENT] } $kq->kevent($t*1000);
@@ -185,8 +198,8 @@ sub pickup_one_message
 			$msg->{d} ||= {};
 			push @msg_queue, $msg;
 			if ($msg->{m} eq "EXIT") {
-				use POSIX ":sys_wait_h";
-				waitpid($msg->{f}, WNOHANG);
+				my $x = waitpid($msg->{f}, WNOHANG);
+				push @processes_to_reap, $msg->{f} if $x == 0;
 			}
 		} elsif ($write_socks{$fd}) {
 			my $s = $write_socks{$fd};
@@ -659,7 +672,7 @@ IPC::Messaging - process handling and message passing, Erlang style
 
 =head1 VERSION
 
-This document describes IPC::Messaging version 0.01_12.
+This document describes IPC::Messaging version 0.01_13.
 
 =head1 SYNOPSIS
 
@@ -746,7 +759,7 @@ Anton Berezin  C<< <tobez@tobez.org> >>
 
 =head1 LICENSE AND COPYRIGHT
 
-Copyright (c) 2007, 2008, Anton Berezin C<< <tobez@tobez.org> >>. All rights reserved.
+Copyright (c) 2007-2010, Anton Berezin C<< <tobez@tobez.org> >>. All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions
