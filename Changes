@@ -1,5 +1,8 @@
 Revision history for IPC::Messaging
 
+0.01_14 Tue Dec 13 12:42:27 CET 2011
+       Bugfix for those modules using $$ eq something.
+
 0.01_13 Sun Nov 14 20:19:06 CET 2010
        Reap zombies better.
 

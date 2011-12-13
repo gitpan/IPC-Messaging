@@ -15,7 +15,7 @@ use Carp;
 use Module::Load::Conditional "can_load";
 use POSIX ":sys_wait_h";
 
-$VERSION = '0.01_13';
+$VERSION = '0.01_14';
 sub spawn (&);
 sub receive (&);
 sub receive_loop (&);
@@ -569,6 +569,7 @@ use Storable;
 use overload '0+'  => \&_numify;
 use overload '""'  => \&_stringify;
 use overload '<=>' => sub { "$_[0]" <=> "$_[1]" };
+use overload 'cmp' => sub { "$_[0]" cmp "$_[1]" };
 
 sub _new
 {
@@ -672,7 +673,7 @@ IPC::Messaging - process handling and message passing, Erlang style
 
 =head1 VERSION
 
-This document describes IPC::Messaging version 0.01_13.
+This document describes IPC::Messaging version 0.01_14.
 
 =head1 SYNOPSIS
 
